@@ -1,5 +1,3 @@
-import io
-import json
 from copy import deepcopy
 
 import pandas as pd
@@ -8,43 +6,232 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Golf Event Scorecard",
-    page_icon="⛳",
+    page_icon="GC",
     layout="wide",
 )
 
 
+# Edit player names and handicap indexes here.
 DEFAULT_PLAYERS = [
-    {"name": "Player 1", "handicap_index": 18.2},
-    {"name": "Player 2", "handicap_index": 16.4},
-    {"name": "Player 3", "handicap_index": 12.7},
-    {"name": "Player 4", "handicap_index": 9.8},
+    {"name": "Mike", "handicap_index": 16},
+    {"name": "Jack", "handicap_index": 12.5},
+    {"name": "Ollie", "handicap_index": 19.5},
+    {"name": "Danny", "handicap_index": 28.2},
 ]
 
-DEFAULT_PAR_SEQUENCE = [4, 4, 3, 5, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 3, 5, 4]
+APP_CSS = """
+<style>
+    .stApp {
+        background: linear-gradient(180deg, #f4f8f1 0%, #ffffff 35%, #f9f7ef 100%);
+    }
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    .hero-card, .section-card, .player-card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid #d8e4d2;
+        border-radius: 18px;
+        box-shadow: 0 14px 40px rgba(41, 74, 47, 0.08);
+    }
+    .hero-card {
+        padding: 1.4rem 1.5rem;
+        margin-bottom: 1rem;
+        background: linear-gradient(135deg, #0f5132 0%, #5d8c49 100%);
+        color: #ffffff;
+        border: none;
+    }
+    .hero-card h1 {
+        margin: 0;
+        font-size: 2rem;
+        color: #ffffff;
+    }
+    .hero-card p {
+        margin: 0.4rem 0 0 0;
+        font-size: 1rem;
+        color: #edf7ea;
+    }
+    .section-card {
+        padding: 1rem 1.1rem;
+        margin-bottom: 1rem;
+    }
+    .player-card {
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.75rem;
+        border-left: 6px solid #d7a73d;
+    }
+    .standings-wrap {
+        margin-top: 1rem;
+        background: linear-gradient(160deg, #18354c 0%, #0f2235 60%, #142c43 100%);
+        border-radius: 20px;
+        padding: 0.9rem;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 40px rgba(10, 28, 44, 0.2);
+    }
+    .standings-title {
+        color: #ffffff;
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin-bottom: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .summary-inline-details {
+        color: #53705d;
+        font-size: 0.95rem;
+        margin-bottom: 0.9rem;
+    }
+    .player-name {
+        font-weight: 700;
+        font-size: 1rem;
+        color: #173622;
+        margin-bottom: 0.15rem;
+    }
+    .player-meta {
+        color: #53705d;
+        font-size: 0.92rem;
+    }
+    .mini-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #5c745f;
+        margin-bottom: 0.2rem;
+    }
+    .mini-value {
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: #173622;
+    }
+    div[data-testid="stMetric"] {
+        background: #ffffff;
+        border: 1px solid #d8e4d2;
+        border-radius: 16px;
+        padding: 0.7rem 0.9rem;
+    }
+    div[data-testid="stDataFrame"] {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid #d8e4d2;
+    }
+    .score-header {
+        padding: 0.3rem 0.1rem;
+        text-align: center;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #173622;
+        border-radius: 10px;
+    }
+    .score-header-meta {
+        background: #edf4e8;
+    }
+    .score-header-mike {
+        background: #f6d7d9;
+    }
+    .score-header-jack {
+        background: #dcefdc;
+    }
+    .score-header-ollie {
+        background: #dce8f7;
+    }
+    .score-header-danny {
+        background: #f7e4d1;
+    }
+    .score-cell-badge {
+        margin-top: 0.15rem;
+        padding: 0.32rem 0.1rem;
+        text-align: center;
+        border-radius: 10px;
+        font-weight: 700;
+        color: #173622;
+    }
+    .score-cell-mike {
+        background: #f6d7d9;
+    }
+    .score-cell-jack {
+        background: #dcefdc;
+    }
+    .score-cell-ollie {
+        background: #dce8f7;
+    }
+    .score-cell-danny {
+        background: #f7e4d1;
+    }
+</style>
+"""
 
 
-def make_default_course(name: str, slope_rating: int, course_rating: float, par_total: int):
-    pars = DEFAULT_PAR_SEQUENCE[:]
-    adjustment = par_total - sum(pars)
-    pars[-1] += adjustment
+def make_default_course(name: str, slope_rating: int, course_rating: float, par_total: int, holes: list[dict]):
     return {
         "name": name,
         "par": par_total,
         "slope_rating": slope_rating,
         "course_rating": course_rating,
         "handicap_allowance": 95,
-        "holes": [
-            {"hole": hole, "par": pars[hole - 1], "stroke_index": hole}
-            for hole in range(1, 19)
-        ],
+        "holes": holes,
     }
+
+
+MOSSOCK_HALL_YELLOW_HOLES = [
+    {"hole": 1, "par": 4, "stroke_index": 3},
+    {"hole": 2, "par": 3, "stroke_index": 13},
+    {"hole": 3, "par": 4, "stroke_index": 1},
+    {"hole": 4, "par": 4, "stroke_index": 7},
+    {"hole": 5, "par": 5, "stroke_index": 9},
+    {"hole": 6, "par": 3, "stroke_index": 17},
+    {"hole": 7, "par": 5, "stroke_index": 11},
+    {"hole": 8, "par": 4, "stroke_index": 15},
+    {"hole": 9, "par": 4, "stroke_index": 5},
+    {"hole": 10, "par": 4, "stroke_index": 12},
+    {"hole": 11, "par": 3, "stroke_index": 18},
+    {"hole": 12, "par": 4, "stroke_index": 10},
+    {"hole": 13, "par": 4, "stroke_index": 8},
+    {"hole": 14, "par": 3, "stroke_index": 16},
+    {"hole": 15, "par": 5, "stroke_index": 6},
+    {"hole": 16, "par": 4, "stroke_index": 2},
+    {"hole": 17, "par": 4, "stroke_index": 4},
+    {"hole": 18, "par": 4, "stroke_index": 14},
+]
+
+
+PLACEHOLDER_DAY_2_HOLES = [
+    {"hole": 1, "par": 4, "stroke_index": 11},
+    {"hole": 2, "par": 4, "stroke_index": 3},
+    {"hole": 3, "par": 4, "stroke_index": 7},
+    {"hole": 4, "par": 3, "stroke_index": 15},
+    {"hole": 5, "par": 4, "stroke_index": 1},
+    {"hole": 6, "par": 4, "stroke_index": 17},
+    {"hole": 7, "par": 5, "stroke_index": 13},
+    {"hole": 8, "par": 5, "stroke_index": 5},
+    {"hole": 9, "par": 4, "stroke_index": 9},
+    {"hole": 10, "par": 3, "stroke_index": 12},
+    {"hole": 11, "par": 4, "stroke_index": 4},
+    {"hole": 12, "par": 4, "stroke_index": 16},
+    {"hole": 13, "par": 4, "stroke_index": 8},
+    {"hole": 14, "par": 4, "stroke_index": 2},
+    {"hole": 15, "par": 3, "stroke_index": 14},
+    {"hole": 16, "par": 3, "stroke_index": 6},
+    {"hole": 17, "par": 4, "stroke_index": 18},
+    {"hole": 18, "par": 5, "stroke_index": 10},
+]
 
 
 DEFAULT_EVENT = {
     "players": deepcopy(DEFAULT_PLAYERS),
     "courses": {
-        "day_1": make_default_course("Mossock Hall", slope_rating=123, course_rating=71.4, par_total=72),
-        "day_2": make_default_course("Huyton and Prescot", slope_rating=128, course_rating=71.8, par_total=72),
+        "day_1": make_default_course(
+            "Mossock Hall",
+            slope_rating=126,
+            course_rating=71.7,
+            par_total=71,
+            holes=deepcopy(MOSSOCK_HALL_YELLOW_HOLES),
+        ),
+        "day_2": make_default_course(
+            "Dean Wood",
+            slope_rating=134,
+            course_rating=68.7,
+            par_total=71,
+            holes=deepcopy(PLACEHOLDER_DAY_2_HOLES),
+        ),
     },
     "scores": {
         "day_1": {f"player_{idx}": [""] * 18 for idx in range(4)},
@@ -76,6 +263,18 @@ def safe_float(value, fallback=0.0):
         return fallback
 
 
+def get_score_input_key(day_key: str, player_idx: int, hole_number: int) -> str:
+    return f"{day_key}_player_{player_idx}_hole_{hole_number}"
+
+
+def sync_single_score_input(day_key: str, player_idx: int, hole_number: int):
+    input_key = get_score_input_key(day_key, player_idx, hole_number)
+    raw_value = st.session_state.get(input_key, "")
+    parsed_value = safe_int(str(raw_value).strip(), fallback="")
+    stored_value = parsed_value if parsed_value != 0 else ""
+    st.session_state.event_data["scores"][day_key][f"player_{player_idx}"][hole_number - 1] = stored_value
+
+
 def get_strokes_received(playing_handicap: int, stroke_index: int) -> int:
     if playing_handicap >= 0:
         base, remainder = divmod(playing_handicap, 18)
@@ -94,11 +293,6 @@ def stableford_points(gross_score: int, par: int, strokes_received: int) -> int:
 def course_handicap(handicap_index: float, slope_rating: int, course_rating: float, par_value: int) -> int:
     calculated = handicap_index * (slope_rating / 113) + (course_rating - par_value)
     return int(round(calculated))
-
-
-def playing_handicap(course_handicap_value: int, allowance_percent: float) -> int:
-    return int(round(course_handicap_value * (allowance_percent / 100)))
-
 
 def normalize_course(course: dict) -> dict:
     normalized = deepcopy(course)
@@ -120,91 +314,41 @@ def normalize_course(course: dict) -> dict:
     return normalized
 
 
-def to_plain_data(value):
-    if isinstance(value, dict):
-        return {key: to_plain_data(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [to_plain_data(item) for item in value]
-    if isinstance(value, tuple):
-        return [to_plain_data(item) for item in value]
-    if hasattr(value, "item"):
-        return value.item()
-    return value
+def inject_styles():
+    st.markdown(APP_CSS, unsafe_allow_html=True)
 
 
-def course_editor(day_key: str, title: str):
-    course = normalize_course(st.session_state.event_data["courses"][day_key])
-    with st.expander(f"{title} course setup", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
-        course["name"] = col1.text_input("Course name", value=course["name"], key=f"{day_key}_name")
-        course["par"] = col2.number_input("Course par", min_value=54, max_value=90, value=course["par"], key=f"{day_key}_par")
-        course["slope_rating"] = col3.number_input(
-            "Slope rating",
-            min_value=55,
-            max_value=155,
-            value=course["slope_rating"],
-            key=f"{day_key}_slope",
-        )
-        course["course_rating"] = col4.number_input(
-            "Course rating",
-            min_value=50.0,
-            max_value=90.0,
-            value=float(course["course_rating"]),
-            step=0.1,
-            key=f"{day_key}_rating",
-        )
-
-        course["handicap_allowance"] = st.number_input(
-            "Handicap allowance (%)",
-            min_value=1.0,
-            max_value=100.0,
-            value=float(course["handicap_allowance"]),
-            step=1.0,
-            key=f"{day_key}_allowance",
-        )
-
-        holes_df = pd.DataFrame(course["holes"])
-        edited_holes = st.data_editor(
-            holes_df,
-            key=f"{day_key}_holes",
-            use_container_width=True,
-            hide_index=True,
-            disabled=["hole"],
-            column_config={
-                "hole": st.column_config.NumberColumn("Hole", required=True),
-                "par": st.column_config.NumberColumn("Par", min_value=3, max_value=6, required=True),
-                "stroke_index": st.column_config.NumberColumn("Stroke Index", min_value=1, max_value=18, required=True),
-            },
-        )
-
-        course["holes"] = [
-            {
-                "hole": safe_int(row["hole"], idx + 1),
-                "par": safe_int(row["par"], 4),
-                "stroke_index": safe_int(row["stroke_index"], idx + 1),
-            }
-            for idx, row in enumerate(edited_holes.to_dict("records"))
-        ]
-        st.session_state.event_data["courses"][day_key] = course
+def render_hero():
+    st.markdown(
+        """
+        <div class="hero-card">
+            <h1>Aughton Major</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-def render_players():
-    st.sidebar.header("Players")
+def get_player_color_class(player_idx: int) -> str:
+    return ["mike", "jack", "ollie", "danny"][player_idx]
+
+
+def render_player_cards():
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("#### Players")
+    cols = st.columns(4)
     for idx, player in enumerate(st.session_state.event_data["players"]):
-        st.sidebar.subheader(f"Player {idx + 1}")
-        player["name"] = st.sidebar.text_input(
-            "Name",
-            value=player["name"],
-            key=f"player_name_{idx}",
-        )
-        player["handicap_index"] = st.sidebar.number_input(
-            "Handicap Index",
-            min_value=-10.0,
-            max_value=54.0,
-            value=float(player["handicap_index"]),
-            step=0.1,
-            key=f"player_hi_{idx}",
-        )
+        with cols[idx]:
+            st.markdown(
+                f"""
+                <div class="player-card">
+                    <div class="player-name">{player["name"]}</div>
+                    <div class="player-meta">Handicap Index: {float(player["handicap_index"]):.1f}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def build_handicap_table(day_key: str) -> pd.DataFrame:
@@ -217,13 +361,11 @@ def build_handicap_table(day_key: str) -> pd.DataFrame:
             course_rating=course["course_rating"],
             par_value=course["par"],
         )
-        play_hcap = playing_handicap(course_hcap, course["handicap_allowance"])
         rows.append(
             {
                 "Player": player["name"],
                 "Handicap Index": round(float(player["handicap_index"]), 1),
                 "Course Handicap": course_hcap,
-                "Playing Handicap": play_hcap,
             }
         )
     return pd.DataFrame(rows)
@@ -237,7 +379,7 @@ def get_player_day_summary(day_key: str):
 
     for idx, player in enumerate(st.session_state.event_data["players"]):
         player_scores = st.session_state.event_data["scores"][day_key][f"player_{idx}"]
-        play_hcap = int(handicap_table.loc[idx, "Playing Handicap"])
+        course_hcap = int(handicap_table.loc[idx, "Course Handicap"])
         gross_total = 0
         stableford_total = 0
         holes_played = 0
@@ -249,7 +391,7 @@ def get_player_day_summary(day_key: str):
             holes_played += 1
             gross_total += score
             hole_info = hole_lookup[hole_number]
-            strokes = get_strokes_received(play_hcap, hole_info["stroke_index"])
+            strokes = get_strokes_received(course_hcap, hole_info["stroke_index"])
             stableford_total += stableford_points(score, hole_info["par"], strokes)
 
         summaries.append(
@@ -264,72 +406,173 @@ def get_player_day_summary(day_key: str):
     return pd.DataFrame(summaries)
 
 
-def score_editor(day_key: str, title: str):
+def build_stableford_table(day_key: str) -> pd.DataFrame:
     course = normalize_course(st.session_state.event_data["courses"][day_key])
-    scores = st.session_state.event_data["scores"][day_key]
-    score_df = pd.DataFrame(
-        {
-            "Hole": list(range(1, 19)),
-            "Par": [hole["par"] for hole in course["holes"]],
-            "SI": [hole["stroke_index"] for hole in course["holes"]],
-            st.session_state.event_data["players"][0]["name"]: scores["player_0"],
-            st.session_state.event_data["players"][1]["name"]: scores["player_1"],
-            st.session_state.event_data["players"][2]["name"]: scores["player_2"],
-            st.session_state.event_data["players"][3]["name"]: scores["player_3"],
-        }
-    )
-
-    st.subheader(f"{title} scoring")
-    st.caption("Enter gross scores as the round progresses. Leave a cell blank if the hole has not been played yet.")
-
-    edited_scores = st.data_editor(
-        score_df,
-        key=f"{day_key}_scores",
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Hole", "Par", "SI"],
-        column_config={
-            "Hole": st.column_config.NumberColumn("Hole"),
-            "Par": st.column_config.NumberColumn("Par"),
-            "SI": st.column_config.NumberColumn("SI"),
-        },
-    )
-
-    player_names = [player["name"] for player in st.session_state.event_data["players"]]
-    for idx, player_name in enumerate(player_names):
-        cleaned_scores = []
-        for value in edited_scores[player_name].tolist():
-            if value in ("", None):
-                cleaned_scores.append("")
-            else:
-                cleaned_scores.append(safe_int(value, ""))
-        st.session_state.event_data["scores"][day_key][f"player_{idx}"] = cleaned_scores
-
     handicap_df = build_handicap_table(day_key)
-    summary_df = get_player_day_summary(day_key)
-
-    col1, col2 = st.columns([1.1, 1])
-    with col1:
-        st.markdown("**Handicap conversion**")
-        st.dataframe(handicap_df, use_container_width=True, hide_index=True)
-    with col2:
-        st.markdown("**Day totals**")
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-
-    st.markdown("**Hole-by-hole Stableford**")
     stableford_rows = []
     for hole in course["holes"]:
         row = {"Hole": hole["hole"], "Par": hole["par"], "SI": hole["stroke_index"]}
         for idx, player in enumerate(st.session_state.event_data["players"]):
-            play_hcap = int(handicap_df.loc[idx, "Playing Handicap"])
+            course_hcap = int(handicap_df.loc[idx, "Course Handicap"])
             score = st.session_state.event_data["scores"][day_key][f"player_{idx}"][hole["hole"] - 1]
             if score in ("", None):
                 row[player["name"]] = ""
                 continue
-            strokes = get_strokes_received(play_hcap, hole["stroke_index"])
+            strokes = get_strokes_received(course_hcap, hole["stroke_index"])
             row[player["name"]] = stableford_points(safe_int(score), hole["par"], strokes)
         stableford_rows.append(row)
-    st.dataframe(pd.DataFrame(stableford_rows), use_container_width=True, hide_index=True)
+    return pd.DataFrame(stableford_rows)
+
+
+def build_shots_received_table(day_key: str) -> pd.DataFrame:
+    course = normalize_course(st.session_state.event_data["courses"][day_key])
+    handicap_df = build_handicap_table(day_key)
+    shots_rows = []
+    for hole in course["holes"]:
+        row = {"Hole": hole["hole"], "SI": hole["stroke_index"]}
+        for idx, player in enumerate(st.session_state.event_data["players"]):
+            course_hcap = int(handicap_df.loc[idx, "Course Handicap"])
+            shots = get_strokes_received(course_hcap, hole["stroke_index"])
+            row[player["name"]] = shots
+        shots_rows.append(row)
+    return pd.DataFrame(shots_rows)
+
+
+def build_course_shots_summary() -> pd.DataFrame:
+    day_1 = build_handicap_table("day_1").rename(columns={"Course Handicap": "Day 1 shots"})
+    day_2 = build_handicap_table("day_2").rename(columns={"Course Handicap": "Day 2 shots"})
+    merged = day_1.merge(day_2[["Player", "Day 2 shots"]], on="Player", how="inner")
+    return merged[["Player", "Handicap Index", "Day 1 shots", "Day 2 shots"]]
+
+
+def build_day_shots_summary(day_key: str) -> pd.DataFrame:
+    handicap_df = build_handicap_table(day_key).rename(columns={"Course Handicap": "Shots"})
+    return handicap_df[["Player", "Handicap Index", "Shots"]]
+
+
+def build_standings_table(summary_df: pd.DataFrame) -> pd.DataFrame:
+    standings = summary_df.copy()
+    standings.insert(0, "#", range(1, len(standings) + 1))
+    standings = standings.rename(columns={"Shots": "Handicap"})
+    return standings[["#", "Player", "Handicap", "Gross", "Stableford"]]
+
+
+def get_hole_stableford_points(day_key: str, player_idx: int, hole_number: int) -> str:
+    score = st.session_state.event_data["scores"][day_key][f"player_{player_idx}"][hole_number - 1]
+    if score in ("", None):
+        return "-"
+
+    course = normalize_course(st.session_state.event_data["courses"][day_key])
+    handicap_df = build_handicap_table(day_key)
+    hole = course["holes"][hole_number - 1]
+    course_hcap = int(handicap_df.loc[player_idx, "Course Handicap"])
+    strokes = get_strokes_received(course_hcap, hole["stroke_index"])
+    return str(stableford_points(safe_int(score), hole["par"], strokes))
+
+
+def get_hole_shots_received(day_key: str, player_idx: int, hole_number: int) -> str:
+    course = normalize_course(st.session_state.event_data["courses"][day_key])
+    handicap_df = build_handicap_table(day_key)
+    hole = course["holes"][hole_number - 1]
+    course_hcap = int(handicap_df.loc[player_idx, "Course Handicap"])
+    return str(get_strokes_received(course_hcap, hole["stroke_index"]))
+
+
+def render_day_snapshot(day_key: str, title: str):
+    course = normalize_course(st.session_state.event_data["courses"][day_key])
+    summary_df = get_player_day_summary(day_key).sort_values(by=["Stableford", "Gross"], ascending=[False, True]).reset_index(drop=True)
+    shots_df = build_day_shots_summary(day_key)
+    summary_df = summary_df.merge(shots_df[["Player", "Shots"]], on="Player", how="left")
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown(f"#### {title} - {course['name']}")
+    st.markdown(
+        f"<div class='summary-inline-details'><strong>Course Details:</strong> Yellow tees, SR {course['slope_rating']}, CR {course['course_rating']:.1f}</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<div class='standings-wrap'><div class='standings-title'>Standings</div>", unsafe_allow_html=True)
+    st.dataframe(
+        build_standings_table(summary_df[["Player", "Shots", "Gross", "Stableford"]]),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "#": st.column_config.NumberColumn(width="small"),
+            "Player": st.column_config.TextColumn(width="medium"),
+            "Handicap": st.column_config.NumberColumn(width="small"),
+            "Gross": st.column_config.NumberColumn(width="small"),
+            "Stableford": st.column_config.NumberColumn(width="small"),
+        },
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def score_editor(day_key: str, title: str):
+    course = normalize_course(st.session_state.event_data["courses"][day_key])
+    st.subheader(f"{title} - {course['name']} scoring")
+    st.caption("Enter gross scores only. Leave a box empty until that hole is played.")
+
+    players = st.session_state.event_data["players"]
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    header_widths = [0.45, 0.45, 0.45, 0.9, 0.45, 0.45, 0.9, 0.45, 0.45, 0.9, 0.45, 0.45, 0.9, 0.45, 0.45]
+    header_cols = st.columns(header_widths)
+    for idx, label in enumerate(["Hole", "Par", "SI"]):
+        header_cols[idx].markdown(f"<div class='score-header score-header-meta'>{label}</div>", unsafe_allow_html=True)
+
+    for player_idx, player in enumerate(players):
+        base_col = 3 + (player_idx * 3)
+        color_class = get_player_color_class(player_idx)
+        header_cols[base_col].markdown(
+            f"<div class='score-header score-header-{color_class}'>{player['name']}</div>",
+            unsafe_allow_html=True,
+        )
+        header_cols[base_col + 1].markdown(
+            f"<div class='score-header score-header-{color_class}'>Shots</div>",
+            unsafe_allow_html=True,
+        )
+        header_cols[base_col + 2].markdown(
+            f"<div class='score-header score-header-{color_class}'>Pts</div>",
+            unsafe_allow_html=True,
+        )
+
+    for hole in course["holes"]:
+        row_cols = st.columns(header_widths)
+        row_cols[0].markdown(str(hole["hole"]))
+        row_cols[1].markdown(str(hole["par"]))
+        row_cols[2].markdown(str(hole["stroke_index"]))
+
+        for player_idx, player in enumerate(players):
+            input_key = get_score_input_key(day_key, player_idx, hole["hole"])
+            current_score = st.session_state.event_data["scores"][day_key][f"player_{player_idx}"][hole["hole"] - 1]
+            if input_key not in st.session_state:
+                st.session_state[input_key] = "" if current_score in ("", None) else str(current_score)
+
+            score_col = 3 + (player_idx * 3)
+            shots_col = score_col + 1
+            points_col = score_col + 2
+            color_class = get_player_color_class(player_idx)
+
+            row_cols[score_col].text_input(
+                label=f"{player['name']} hole {hole['hole']}",
+                value=st.session_state[input_key],
+                key=input_key,
+                on_change=sync_single_score_input,
+                args=(day_key, player_idx, hole["hole"]),
+                label_visibility="collapsed",
+                placeholder="-",
+                max_chars=2,
+            )
+            row_cols[shots_col].markdown(
+                f"<div class='score-cell-badge score-cell-{color_class}'>{get_hole_shots_received(day_key, player_idx, hole['hole'])}</div>",
+                unsafe_allow_html=True,
+            )
+            row_cols[points_col].markdown(
+                f"<div class='score-cell-badge score-cell-{color_class}'>{get_hole_stableford_points(day_key, player_idx, hole['hole'])}</div>",
+                unsafe_allow_html=True,
+            )
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 def cumulative_leaderboard():
@@ -350,62 +593,57 @@ def cumulative_leaderboard():
     return merged
 
 
-def render_save_load():
-    st.sidebar.header("Event file")
-    export_data = json.dumps(to_plain_data(st.session_state.event_data), indent=2)
-    st.sidebar.download_button(
-        "Download event JSON",
-        data=export_data,
-        file_name="golf_event_scorecard.json",
-        mime="application/json",
+def render_leaderboard(overview: pd.DataFrame):
+    leader = overview.iloc[0]
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("#### Cumulative leaderboard")
+    metrics = st.columns(4)
+    metrics[0].metric("Leading player", leader["Player"])
+    metrics[1].metric("Total points", int(leader["Total Stableford"]))
+    metrics[2].metric("Day 1 logged", int(overview["Day 1 Holes"].sum()))
+    metrics[3].metric("Day 2 logged", int(overview["Day 2 Holes"].sum()))
+    st.dataframe(
+        overview[["Position", "Player", "Total Stableford", "Day 1 Stableford", "Day 2 Stableford", "Total Gross"]],
+        use_container_width=True,
+        hide_index=True,
     )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    uploaded = st.sidebar.file_uploader("Load event JSON", type=["json"])
-    if uploaded is not None:
-        loaded = json.load(io.StringIO(uploaded.getvalue().decode("utf-8")))
-        st.session_state.event_data = loaded
-        st.rerun()
 
-    if st.sidebar.button("Reset event"):
-        st.session_state.event_data = deepcopy(DEFAULT_EVENT)
-        st.rerun()
+def render_overall_page():
+    overview = cumulative_leaderboard()
+    render_player_cards()
+    render_leaderboard(overview)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("#### Course shots summary")
+    st.dataframe(build_course_shots_summary(), use_container_width=True, hide_index=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_day_page(day_key: str, title: str):
+    render_day_snapshot(day_key, title)
+    score_editor(day_key, title)
 
 
 def main():
     initialize_state()
+    inject_styles()
 
-    st.title("Two-Day Golf Event Scorecard")
-    st.write(
-        "Track four players across Mossock Hall and Huyton and Prescot with live score entry, "
-        "automatic playing handicaps, Stableford scoring, and a cumulative leaderboard."
+    render_hero()
+    page = st.segmented_control(
+        "View",
+        options=["Overall Leaderboard", "Day 1", "Day 2"],
+        default="Overall Leaderboard",
+        selection_mode="single",
     )
 
-    render_players()
-    render_save_load()
-
-    overview = cumulative_leaderboard()
-    top_col, bottom_col = st.columns([1.1, 1])
-    with top_col:
-        st.subheader("Cumulative leaderboard")
-        st.dataframe(overview, use_container_width=True, hide_index=True)
-    with bottom_col:
-        st.subheader("Event progress")
-        metric_cols = st.columns(3)
-        metric_cols[0].metric("Day 1 holes logged", int(overview["Day 1 Holes"].sum()))
-        metric_cols[1].metric("Day 2 holes logged", int(overview["Day 2 Holes"].sum()))
-        metric_cols[2].metric("Total Stableford points", int(overview["Total Stableford"].sum()))
-        st.info(
-            "Course details are editable so you can match the exact tee, par, stroke index, "
-            "slope rating, and course rating from your scorecard."
-        )
-
-    tab1, tab2 = st.tabs(["Day 1: Mossock Hall", "Day 2: Huyton and Prescot"])
-    with tab1:
-        course_editor("day_1", "Day 1")
-        score_editor("day_1", "Day 1")
-    with tab2:
-        course_editor("day_2", "Day 2")
-        score_editor("day_2", "Day 2")
+    if page == "Overall Leaderboard":
+        render_overall_page()
+    elif page == "Day 1":
+        render_day_page("day_1", "Day 1")
+    else:
+        render_day_page("day_2", "Day 2")
 
 
 if __name__ == "__main__":
