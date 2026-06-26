@@ -7,7 +7,7 @@ import streamlit as st
 st.set_page_config(
     page_title="Golf Event Scorecard",
     page_icon="GC",
-    layout="wide",
+    layout="centered",
 )
 
 
@@ -25,8 +25,9 @@ APP_CSS = """
         background: linear-gradient(180deg, #f4f8f1 0%, #ffffff 35%, #f9f7ef 100%);
     }
     .block-container {
-        padding-top: 2rem;
+        padding-top: 1.5rem;
         padding-bottom: 2rem;
+        max-width: 960px;
     }
     .hero-card, .section-card, .player-card {
         background: rgba(255, 255, 255, 0.92);
@@ -55,10 +56,96 @@ APP_CSS = """
         padding: 1rem 1.1rem;
         margin-bottom: 1rem;
     }
+    .player-grid, .summary-grid, .metrics-grid {
+        display: grid;
+        gap: 0.8rem;
+    }
+    .player-grid {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+    .summary-grid {
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        margin-top: 0.85rem;
+    }
+    .metrics-grid {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        margin: 0.9rem 0 1rem 0;
+    }
     .player-card {
         padding: 0.9rem 1rem;
-        margin-bottom: 0.75rem;
         border-left: 6px solid #d7a73d;
+    }
+    .summary-card, .metric-card, .hole-card {
+        background: #ffffff;
+        border: 1px solid #d8e4d2;
+        border-radius: 16px;
+        box-shadow: 0 10px 28px rgba(41, 74, 47, 0.06);
+    }
+    .summary-card {
+        padding: 0.95rem 1rem;
+    }
+    .summary-card.is-leader {
+        background: linear-gradient(135deg, #173622 0%, #2d6b3d 100%);
+        border: none;
+        color: #ffffff;
+    }
+    .summary-rank {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #5c745f;
+        margin-bottom: 0.25rem;
+    }
+    .summary-card.is-leader .summary-rank,
+    .summary-card.is-leader .summary-stat-label,
+    .summary-card.is-leader .summary-meta {
+        color: rgba(255, 255, 255, 0.8);
+    }
+    .summary-card.is-leader .summary-player,
+    .summary-card.is-leader .summary-stat-value {
+        color: #ffffff;
+    }
+    .summary-player {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #173622;
+        margin-bottom: 0.55rem;
+    }
+    .summary-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+    }
+    .summary-stat-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #5c745f;
+    }
+    .summary-stat-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #173622;
+    }
+    .summary-meta {
+        margin-top: 0.7rem;
+        font-size: 0.88rem;
+        color: #53705d;
+    }
+    .metric-card {
+        padding: 0.85rem 0.95rem;
+    }
+    .metric-label {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #5c745f;
+        margin-bottom: 0.25rem;
+    }
+    .metric-value {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #173622;
     }
     .standings-wrap {
         margin-top: 1rem;
@@ -76,6 +163,11 @@ APP_CSS = """
         letter-spacing: 0.05em;
     }
     .summary-inline-details {
+        color: #53705d;
+        font-size: 0.95rem;
+        margin-bottom: 0.9rem;
+    }
+    .score-intro {
         color: #53705d;
         font-size: 0.95rem;
         margin-bottom: 0.9rem;
@@ -113,36 +205,77 @@ APP_CSS = """
         overflow: hidden;
         border: 1px solid #d8e4d2;
     }
-    .score-header {
-        padding: 0.3rem 0.1rem;
-        text-align: center;
-        font-size: 0.82rem;
+    .hole-card {
+        padding: 0.9rem;
+        margin-bottom: 0.85rem;
+    }
+    .hole-topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8rem;
+        margin-bottom: 0.75rem;
+    }
+    .hole-number {
+        font-size: 1.15rem;
         font-weight: 700;
         color: #173622;
-        border-radius: 10px;
     }
-    .score-header-meta {
+    .hole-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        justify-content: flex-end;
+    }
+    .hole-chip {
+        padding: 0.3rem 0.55rem;
+        border-radius: 999px;
         background: #edf4e8;
+        color: #355440;
+        font-size: 0.78rem;
+        font-weight: 700;
     }
-    .score-header-mike {
-        background: #f6d7d9;
+    .player-score-shell {
+        border-top: 1px solid #ebf1e7;
+        padding-top: 0.75rem;
+        margin-top: 0.75rem;
     }
-    .score-header-jack {
-        background: #dcefdc;
+    .player-score-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.55rem;
     }
-    .score-header-ollie {
-        background: #dce8f7;
+    .player-score-name {
+        font-weight: 700;
+        color: #173622;
     }
-    .score-header-danny {
-        background: #f7e4d1;
+    .player-score-meta {
+        font-size: 0.86rem;
+        color: #53705d;
+    }
+    .badge-row {
+        display: flex;
+        gap: 0.55rem;
+        flex-wrap: wrap;
+        margin-top: 0.55rem;
     }
     .score-cell-badge {
-        margin-top: 0.15rem;
-        padding: 0.32rem 0.1rem;
+        min-width: 74px;
+        padding: 0.38rem 0.55rem;
         text-align: center;
         border-radius: 10px;
         font-weight: 700;
         color: #173622;
+    }
+    .score-badge-label {
+        display: block;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.08rem;
+        opacity: 0.78;
     }
     .score-cell-mike {
         background: #f6d7d9;
@@ -155,6 +288,47 @@ APP_CSS = """
     }
     .score-cell-danny {
         background: #f7e4d1;
+    }
+    div[data-testid="stSegmentedControl"] {
+        margin-bottom: 1rem;
+    }
+    @media (max-width: 640px) {
+        .block-container {
+            padding-top: 1rem;
+            padding-left: 0.85rem;
+            padding-right: 0.85rem;
+            padding-bottom: 1.5rem;
+        }
+        .hero-card {
+            padding: 1rem;
+            border-radius: 16px;
+        }
+        .hero-card h1 {
+            font-size: 1.55rem;
+        }
+        .section-card {
+            padding: 0.85rem;
+            border-radius: 16px;
+        }
+        .summary-grid, .player-grid, .metrics-grid {
+            gap: 0.65rem;
+        }
+        .hole-card {
+            padding: 0.8rem;
+        }
+        .hole-topline, .player-score-head {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+        .hole-meta {
+            justify-content: flex-start;
+        }
+        .badge-row {
+            width: 100%;
+        }
+        .score-cell-badge {
+            flex: 1 1 0;
+        }
     }
 </style>
 """
@@ -336,19 +510,83 @@ def get_player_color_class(player_idx: int) -> str:
 def render_player_cards():
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Players")
-    cols = st.columns(4)
-    for idx, player in enumerate(st.session_state.event_data["players"]):
-        with cols[idx]:
-            st.markdown(
-                f"""
-                <div class="player-card">
-                    <div class="player-name">{player["name"]}</div>
-                    <div class="player-meta">Handicap Index: {float(player["handicap_index"]):.1f}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    player_cards = []
+    for player in st.session_state.event_data["players"]:
+        player_cards.append(
+            f"""
+            <div class="player-card">
+                <div class="player-name">{player["name"]}</div>
+                <div class="player-meta">Handicap Index: {float(player["handicap_index"]):.1f}</div>
+            </div>
+            """
+        )
+    st.markdown(f"<div class='player-grid'>{''.join(player_cards)}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_metric_cards(metrics: list[tuple[str, str]]):
+    metric_markup = "".join(
+        f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+        </div>
+        """
+        for label, value in metrics
+    )
+    st.markdown(f"<div class='metrics-grid'>{metric_markup}</div>", unsafe_allow_html=True)
+
+
+def render_summary_cards(rows: list[dict], total_points_key: str, gross_key: str, holes_key: str | None = None):
+    cards = []
+    for idx, row in enumerate(rows, start=1):
+        leader_class = " is-leader" if idx == 1 else ""
+        hole_meta = f"<div class='summary-meta'>Holes logged: {int(row[holes_key])}</div>" if holes_key else ""
+        cards.append(
+            f"""
+            <div class="summary-card{leader_class}">
+                <div class="summary-rank">Position {idx}</div>
+                <div class="summary-player">{row["Player"]}</div>
+                <div class="summary-stats">
+                    <div>
+                        <div class="summary-stat-label">Stableford</div>
+                        <div class="summary-stat-value">{int(row[total_points_key])}</div>
+                    </div>
+                    <div>
+                        <div class="summary-stat-label">Gross</div>
+                        <div class="summary-stat-value">{int(row[gross_key])}</div>
+                    </div>
+                </div>
+                {hole_meta}
+            </div>
+            """
+        )
+    st.markdown(f"<div class='summary-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
+
+
+def render_course_shots_cards():
+    shots_df = build_course_shots_summary()
+    cards = []
+    for row in shots_df.to_dict("records"):
+        cards.append(
+            f"""
+            <div class="summary-card">
+                <div class="summary-player">{row["Player"]}</div>
+                <div class="summary-stats">
+                    <div>
+                        <div class="summary-stat-label">Handicap Index</div>
+                        <div class="summary-stat-value">{float(row["Handicap Index"]):.1f}</div>
+                    </div>
+                    <div>
+                        <div class="summary-stat-label">Day 1 shots</div>
+                        <div class="summary-stat-value">{int(row["Day 1 shots"])}</div>
+                    </div>
+                </div>
+                <div class="summary-meta">Day 2 shots: {int(row["Day 2 shots"])}</div>
+            </div>
+            """
+        )
+    st.markdown(f"<div class='summary-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
 
 def build_handicap_table(day_key: str) -> pd.DataFrame:
@@ -450,13 +688,6 @@ def build_day_shots_summary(day_key: str) -> pd.DataFrame:
     return handicap_df[["Player", "Handicap Index", "Shots"]]
 
 
-def build_standings_table(summary_df: pd.DataFrame) -> pd.DataFrame:
-    standings = summary_df.copy()
-    standings.insert(0, "#", range(1, len(standings) + 1))
-    standings = standings.rename(columns={"Shots": "Handicap"})
-    return standings[["#", "Player", "Handicap", "Gross", "Stableford"]]
-
-
 def get_hole_stableford_points(day_key: str, player_idx: int, hole_number: int) -> str:
     score = st.session_state.event_data["scores"][day_key][f"player_{player_idx}"][hole_number - 1]
     if score in ("", None):
@@ -490,57 +721,35 @@ def render_day_snapshot(day_key: str, title: str):
         f"<div class='summary-inline-details'><strong>Course Details:</strong> Yellow tees, SR {course['slope_rating']}, CR {course['course_rating']:.1f}</div>",
         unsafe_allow_html=True,
     )
-    st.markdown("<div class='standings-wrap'><div class='standings-title'>Standings</div>", unsafe_allow_html=True)
-    st.dataframe(
-        build_standings_table(summary_df[["Player", "Shots", "Gross", "Stableford"]]),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "#": st.column_config.NumberColumn(width="small"),
-            "Player": st.column_config.TextColumn(width="medium"),
-            "Handicap": st.column_config.NumberColumn(width="small"),
-            "Gross": st.column_config.NumberColumn(width="small"),
-            "Stableford": st.column_config.NumberColumn(width="small"),
-        },
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    render_summary_cards(summary_df.to_dict("records"), "Stableford", "Gross", "Holes Played")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 def score_editor(day_key: str, title: str):
     course = normalize_course(st.session_state.event_data["courses"][day_key])
     st.subheader(f"{title} - {course['name']} scoring")
-    st.caption("Enter gross scores only. Leave a box empty until that hole is played.")
+    st.markdown(
+        "<div class='score-intro'>Enter gross scores only. Leave a box empty until that hole is played.</div>",
+        unsafe_allow_html=True,
+    )
 
     players = st.session_state.event_data["players"]
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    header_widths = [0.45, 0.45, 0.45, 0.9, 0.45, 0.45, 0.9, 0.45, 0.45, 0.9, 0.45, 0.45, 0.9, 0.45, 0.45]
-    header_cols = st.columns(header_widths)
-    for idx, label in enumerate(["Hole", "Par", "SI"]):
-        header_cols[idx].markdown(f"<div class='score-header score-header-meta'>{label}</div>", unsafe_allow_html=True)
-
-    for player_idx, player in enumerate(players):
-        base_col = 3 + (player_idx * 3)
-        color_class = get_player_color_class(player_idx)
-        header_cols[base_col].markdown(
-            f"<div class='score-header score-header-{color_class}'>{player['name']}</div>",
-            unsafe_allow_html=True,
-        )
-        header_cols[base_col + 1].markdown(
-            f"<div class='score-header score-header-{color_class}'>Shots</div>",
-            unsafe_allow_html=True,
-        )
-        header_cols[base_col + 2].markdown(
-            f"<div class='score-header score-header-{color_class}'>Pts</div>",
-            unsafe_allow_html=True,
-        )
-
     for hole in course["holes"]:
-        row_cols = st.columns(header_widths)
-        row_cols[0].markdown(str(hole["hole"]))
-        row_cols[1].markdown(str(hole["par"]))
-        row_cols[2].markdown(str(hole["stroke_index"]))
+        st.markdown(
+            f"""
+            <div class="hole-card">
+                <div class="hole-topline">
+                    <div class="hole-number">Hole {hole["hole"]}</div>
+                    <div class="hole-meta">
+                        <div class="hole-chip">Par {hole["par"]}</div>
+                        <div class="hole-chip">SI {hole["stroke_index"]}</div>
+                    </div>
+                </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         for player_idx, player in enumerate(players):
             input_key = get_score_input_key(day_key, player_idx, hole["hole"])
@@ -548,29 +757,45 @@ def score_editor(day_key: str, title: str):
             if input_key not in st.session_state:
                 st.session_state[input_key] = "" if current_score in ("", None) else str(current_score)
 
-            score_col = 3 + (player_idx * 3)
-            shots_col = score_col + 1
-            points_col = score_col + 2
             color_class = get_player_color_class(player_idx)
+            st.markdown(
+                f"""
+                <div class="player-score-shell">
+                    <div class="player-score-head">
+                        <div class="player-score-name">{player["name"]}</div>
+                        <div class="player-score-meta">Gross score, shots received, and Stableford points</div>
+                    </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-            row_cols[score_col].text_input(
+            st.text_input(
                 label=f"{player['name']} hole {hole['hole']}",
                 value=st.session_state[input_key],
                 key=input_key,
                 on_change=sync_single_score_input,
                 args=(day_key, player_idx, hole["hole"]),
                 label_visibility="collapsed",
-                placeholder="-",
+                placeholder="Enter score",
                 max_chars=2,
             )
-            row_cols[shots_col].markdown(
-                f"<div class='score-cell-badge score-cell-{color_class}'>{get_hole_shots_received(day_key, player_idx, hole['hole'])}</div>",
+            st.markdown(
+                f"""
+                <div class="badge-row">
+                    <div class='score-cell-badge score-cell-{color_class}'>
+                        <span class="score-badge-label">Shots</span>
+                        {get_hole_shots_received(day_key, player_idx, hole['hole'])}
+                    </div>
+                    <div class='score-cell-badge score-cell-{color_class}'>
+                        <span class="score-badge-label">Points</span>
+                        {get_hole_stableford_points(day_key, player_idx, hole['hole'])}
+                    </div>
+                </div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
-            row_cols[points_col].markdown(
-                f"<div class='score-cell-badge score-cell-{color_class}'>{get_hole_stableford_points(day_key, player_idx, hole['hole'])}</div>",
-                unsafe_allow_html=True,
-            )
+        st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -597,16 +822,15 @@ def render_leaderboard(overview: pd.DataFrame):
     leader = overview.iloc[0]
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Cumulative leaderboard")
-    metrics = st.columns(4)
-    metrics[0].metric("Leading player", leader["Player"])
-    metrics[1].metric("Total points", int(leader["Total Stableford"]))
-    metrics[2].metric("Day 1 logged", int(overview["Day 1 Holes"].sum()))
-    metrics[3].metric("Day 2 logged", int(overview["Day 2 Holes"].sum()))
-    st.dataframe(
-        overview[["Position", "Player", "Total Stableford", "Day 1 Stableford", "Day 2 Stableford", "Total Gross"]],
-        use_container_width=True,
-        hide_index=True,
+    render_metric_cards(
+        [
+            ("Leading player", str(leader["Player"])),
+            ("Total points", str(int(leader["Total Stableford"]))),
+            ("Day 1 logged", str(int(overview["Day 1 Holes"].sum()))),
+            ("Day 2 logged", str(int(overview["Day 2 Holes"].sum()))),
+        ]
     )
+    render_summary_cards(overview.to_dict("records"), "Total Stableford", "Total Gross", "Total Holes Played")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -617,7 +841,7 @@ def render_overall_page():
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Course shots summary")
-    st.dataframe(build_course_shots_summary(), use_container_width=True, hide_index=True)
+    render_course_shots_cards()
     st.markdown("</div>", unsafe_allow_html=True)
 
 
