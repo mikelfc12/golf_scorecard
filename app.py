@@ -23,7 +23,7 @@ DEFAULT_PLAYERS = [
     {"name": "Mike", "handicap_index": 16},
     {"name": "Jack", "handicap_index": 12.5},
     {"name": "Ollie", "handicap_index": 19.5},
-    {"name": "Danny", "handicap_index": 28.2},
+    {"name": "Danny", "handicap_index": 30.3},
 ]
 
 DATA_FILE = Path("event_data.json")
