@@ -1,4 +1,11 @@
 from copy import deepcopy
+from datetime import datetime, timezone
+import base64
+import json
+import os
+from pathlib import Path
+from textwrap import dedent
+from urllib import error, request
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +25,9 @@ DEFAULT_PLAYERS = [
     {"name": "Ollie", "handicap_index": 19.5},
     {"name": "Danny", "handicap_index": 28.2},
 ]
+
+DATA_FILE = Path("event_data.json")
+GITHUB_API_BASE = "https://api.github.com"
 
 APP_CSS = """
 <style>
@@ -414,9 +424,169 @@ DEFAULT_EVENT = {
 }
 
 
+def get_secret_or_env(name: str, default: str = "") -> str:
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+    return os.getenv(name, default)
+
+
+def normalize_event_data(raw_data: dict | None) -> dict:
+    normalized = deepcopy(DEFAULT_EVENT)
+    if not isinstance(raw_data, dict):
+        return normalized
+
+    players = raw_data.get("players", [])
+    if isinstance(players, list):
+        for idx, default_player in enumerate(normalized["players"]):
+            if idx >= len(players) or not isinstance(players[idx], dict):
+                continue
+            incoming = players[idx]
+            default_player["name"] = str(incoming.get("name", default_player["name"]))
+            default_player["handicap_index"] = safe_float(
+                incoming.get("handicap_index"),
+                float(default_player["handicap_index"]),
+            )
+
+    for day_key, default_course in normalized["courses"].items():
+        course = raw_data.get("courses", {}).get(day_key, {})
+        if not isinstance(course, dict):
+            continue
+        default_course["name"] = str(course.get("name", default_course["name"]))
+        default_course["par"] = safe_int(course.get("par"), default_course["par"])
+        default_course["slope_rating"] = safe_int(course.get("slope_rating"), default_course["slope_rating"])
+        default_course["course_rating"] = safe_float(course.get("course_rating"), default_course["course_rating"])
+        default_course["handicap_allowance"] = safe_float(
+            course.get("handicap_allowance"),
+            default_course["handicap_allowance"],
+        )
+        holes = course.get("holes", [])
+        if isinstance(holes, list) and len(holes) == 18:
+            default_course["holes"] = [
+                {
+                    "hole": safe_int(hole.get("hole"), idx + 1),
+                    "par": safe_int(hole.get("par"), default_course["holes"][idx]["par"]),
+                    "stroke_index": safe_int(hole.get("stroke_index"), default_course["holes"][idx]["stroke_index"]),
+                }
+                for idx, hole in enumerate(holes)
+                if isinstance(hole, dict)
+            ]
+
+    for day_key in normalized["scores"]:
+        incoming_scores = raw_data.get("scores", {}).get(day_key, {})
+        if not isinstance(incoming_scores, dict):
+            continue
+        for idx in range(len(normalized["players"])):
+            player_key = f"player_{idx}"
+            score_list = incoming_scores.get(player_key, [])
+            if not isinstance(score_list, list):
+                continue
+            normalized["scores"][day_key][player_key] = [
+                safe_int(value, fallback="") if safe_int(value, fallback=0) != 0 else ""
+                for value in score_list[:18]
+            ]
+            if len(normalized["scores"][day_key][player_key]) < 18:
+                normalized["scores"][day_key][player_key].extend([""] * (18 - len(normalized["scores"][day_key][player_key])))
+
+    return normalized
+
+
+def load_event_data() -> dict:
+    if not DATA_FILE.exists():
+        return deepcopy(DEFAULT_EVENT)
+
+    try:
+        with DATA_FILE.open("r", encoding="utf-8") as file_handle:
+            return normalize_event_data(json.load(file_handle))
+    except (OSError, json.JSONDecodeError):
+        return deepcopy(DEFAULT_EVENT)
+
+
+def set_persistence_status(saved: bool, message: str, github_enabled: bool | None = None):
+    st.session_state.persistence_status = {
+        "saved": saved,
+        "message": message,
+        "updated_at": datetime.now().strftime("%H:%M:%S"),
+        "github_enabled": github_enabled,
+    }
+
+
+def sync_event_data_to_github(file_text: str):
+    token = get_secret_or_env("GITHUB_TOKEN")
+    repo = get_secret_or_env("GITHUB_REPO", "mikelfc12/golf_scorecard")
+    branch = get_secret_or_env("GITHUB_BRANCH", "main")
+    file_path = get_secret_or_env("GITHUB_DATA_PATH", DATA_FILE.name)
+
+    if not token:
+        return False, "Saved locally. Add GITHUB_TOKEN to also commit scores to GitHub."
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "golf-scorecard-app",
+    }
+    contents_url = f"{GITHUB_API_BASE}/repos/{repo}/contents/{file_path}"
+
+    sha_value = None
+    get_request = request.Request(f"{contents_url}?ref={branch}", headers=headers, method="GET")
+    try:
+        with request.urlopen(get_request, timeout=15) as response:
+            existing = json.loads(response.read().decode("utf-8"))
+            sha_value = existing.get("sha")
+    except error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+    payload = {
+        "message": f"Update golf scores {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        "content": base64.b64encode(file_text.encode("utf-8")).decode("utf-8"),
+        "branch": branch,
+    }
+    if sha_value:
+        payload["sha"] = sha_value
+
+    put_request = request.Request(
+        contents_url,
+        headers={**headers, "Content-Type": "application/json"},
+        data=json.dumps(payload).encode("utf-8"),
+        method="PUT",
+    )
+    with request.urlopen(put_request, timeout=20) as response:
+        response_payload = json.loads(response.read().decode("utf-8"))
+    commit_sha = response_payload.get("commit", {}).get("sha", "")
+    short_sha = commit_sha[:7] if commit_sha else "created"
+    return True, f"Saved locally and committed to GitHub ({short_sha})."
+
+
+def persist_event_data():
+    normalized = normalize_event_data(st.session_state.event_data)
+    st.session_state.event_data = normalized
+    file_text = json.dumps(normalized, indent=2)
+
+    try:
+        DATA_FILE.write_text(file_text + "\n", encoding="utf-8")
+    except OSError as exc:
+        set_persistence_status(False, f"Save failed: {exc}")
+        return
+
+    try:
+        github_saved, message = sync_event_data_to_github(file_text + "\n")
+        set_persistence_status(True, message, github_enabled=github_saved)
+    except Exception as exc:
+        set_persistence_status(True, f"Saved locally, but GitHub sync failed: {exc}")
+
+
 def initialize_state():
     if "event_data" not in st.session_state:
-        st.session_state.event_data = deepcopy(DEFAULT_EVENT)
+        st.session_state.event_data = load_event_data()
+    if "persistence_status" not in st.session_state:
+        github_configured = bool(get_secret_or_env("GITHUB_TOKEN"))
+        default_message = "Scores save on this device."
+        if github_configured:
+            default_message = "Scores save locally and can sync to GitHub."
+        set_persistence_status(True, default_message, github_enabled=github_configured)
 
 
 def safe_int(value, fallback=0):
@@ -447,6 +617,7 @@ def sync_single_score_input(day_key: str, player_idx: int, hole_number: int):
     parsed_value = safe_int(str(raw_value).strip(), fallback="")
     stored_value = parsed_value if parsed_value != 0 else ""
     st.session_state.event_data["scores"][day_key][f"player_{player_idx}"][hole_number - 1] = stored_value
+    persist_event_data()
 
 
 def get_strokes_received(playing_handicap: int, stroke_index: int) -> int:
@@ -503,35 +674,47 @@ def render_hero():
     )
 
 
+def render_persistence_status():
+    status = st.session_state.get("persistence_status", {})
+    timestamp = status.get("updated_at", "")
+    message = status.get("message", "Scores have not been saved yet.")
+    if timestamp:
+        st.caption(f"{message} Last update: {timestamp}")
+    else:
+        st.caption(message)
+
+
 def get_player_color_class(player_idx: int) -> str:
     return ["mike", "jack", "ollie", "danny"][player_idx]
 
 
 def render_player_cards():
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Players")
     player_cards = []
     for player in st.session_state.event_data["players"]:
         player_cards.append(
-            f"""
-            <div class="player-card">
-                <div class="player-name">{player["name"]}</div>
-                <div class="player-meta">Handicap Index: {float(player["handicap_index"]):.1f}</div>
-            </div>
-            """
+            dedent(
+                f"""
+                <div class="player-card">
+                    <div class="player-name">{player["name"]}</div>
+                    <div class="player-meta">Handicap Index: {float(player["handicap_index"]):.1f}</div>
+                </div>
+                """
+            ).strip()
         )
     st.markdown(f"<div class='player-grid'>{''.join(player_cards)}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_metric_cards(metrics: list[tuple[str, str]]):
     metric_markup = "".join(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">{label}</div>
-            <div class="metric-value">{value}</div>
-        </div>
-        """
+        dedent(
+            f"""
+            <div class="metric-card">
+                <div class="metric-label">{label}</div>
+                <div class="metric-value">{value}</div>
+            </div>
+            """
+        ).strip()
         for label, value in metrics
     )
     st.markdown(f"<div class='metrics-grid'>{metric_markup}</div>", unsafe_allow_html=True)
@@ -543,23 +726,25 @@ def render_summary_cards(rows: list[dict], total_points_key: str, gross_key: str
         leader_class = " is-leader" if idx == 1 else ""
         hole_meta = f"<div class='summary-meta'>Holes logged: {int(row[holes_key])}</div>" if holes_key else ""
         cards.append(
-            f"""
-            <div class="summary-card{leader_class}">
-                <div class="summary-rank">Position {idx}</div>
-                <div class="summary-player">{row["Player"]}</div>
-                <div class="summary-stats">
-                    <div>
-                        <div class="summary-stat-label">Stableford</div>
-                        <div class="summary-stat-value">{int(row[total_points_key])}</div>
+            dedent(
+                f"""
+                <div class="summary-card{leader_class}">
+                    <div class="summary-rank">Position {idx}</div>
+                    <div class="summary-player">{row["Player"]}</div>
+                    <div class="summary-stats">
+                        <div>
+                            <div class="summary-stat-label">Stableford</div>
+                            <div class="summary-stat-value">{int(row[total_points_key])}</div>
+                        </div>
+                        <div>
+                            <div class="summary-stat-label">Gross</div>
+                            <div class="summary-stat-value">{int(row[gross_key])}</div>
+                        </div>
                     </div>
-                    <div>
-                        <div class="summary-stat-label">Gross</div>
-                        <div class="summary-stat-value">{int(row[gross_key])}</div>
-                    </div>
+                    {hole_meta}
                 </div>
-                {hole_meta}
-            </div>
-            """
+                """
+            ).strip()
         )
     st.markdown(f"<div class='summary-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
@@ -569,22 +754,24 @@ def render_course_shots_cards():
     cards = []
     for row in shots_df.to_dict("records"):
         cards.append(
-            f"""
-            <div class="summary-card">
-                <div class="summary-player">{row["Player"]}</div>
-                <div class="summary-stats">
-                    <div>
-                        <div class="summary-stat-label">Handicap Index</div>
-                        <div class="summary-stat-value">{float(row["Handicap Index"]):.1f}</div>
+            dedent(
+                f"""
+                <div class="summary-card">
+                    <div class="summary-player">{row["Player"]}</div>
+                    <div class="summary-stats">
+                        <div>
+                            <div class="summary-stat-label">Handicap Index</div>
+                            <div class="summary-stat-value">{float(row["Handicap Index"]):.1f}</div>
+                        </div>
+                        <div>
+                            <div class="summary-stat-label">Day 1 shots</div>
+                            <div class="summary-stat-value">{int(row["Day 1 shots"])}</div>
+                        </div>
                     </div>
-                    <div>
-                        <div class="summary-stat-label">Day 1 shots</div>
-                        <div class="summary-stat-value">{int(row["Day 1 shots"])}</div>
-                    </div>
+                    <div class="summary-meta">Day 2 shots: {int(row["Day 2 shots"])}</div>
                 </div>
-                <div class="summary-meta">Day 2 shots: {int(row["Day 2 shots"])}</div>
-            </div>
-            """
+                """
+            ).strip()
         )
     st.markdown(f"<div class='summary-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
@@ -715,14 +902,12 @@ def render_day_snapshot(day_key: str, title: str):
     shots_df = build_day_shots_summary(day_key)
     summary_df = summary_df.merge(shots_df[["Player", "Shots"]], on="Player", how="left")
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown(f"#### {title} - {course['name']}")
     st.markdown(
         f"<div class='summary-inline-details'><strong>Course Details:</strong> Yellow tees, SR {course['slope_rating']}, CR {course['course_rating']:.1f}</div>",
         unsafe_allow_html=True,
     )
     render_summary_cards(summary_df.to_dict("records"), "Stableford", "Gross", "Holes Played")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def score_editor(day_key: str, title: str):
@@ -735,7 +920,6 @@ def score_editor(day_key: str, title: str):
 
     players = st.session_state.event_data["players"]
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     for hole in course["holes"]:
         st.markdown(
             f"""
@@ -763,7 +947,6 @@ def score_editor(day_key: str, title: str):
                 <div class="player-score-shell">
                     <div class="player-score-head">
                         <div class="player-score-name">{player["name"]}</div>
-                        <div class="player-score-meta">Gross score, shots received, and Stableford points</div>
                     </div>
                 """,
                 unsafe_allow_html=True,
@@ -796,7 +979,6 @@ def score_editor(day_key: str, title: str):
                 unsafe_allow_html=True,
             )
         st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 
@@ -820,7 +1002,6 @@ def cumulative_leaderboard():
 
 def render_leaderboard(overview: pd.DataFrame):
     leader = overview.iloc[0]
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Cumulative leaderboard")
     render_metric_cards(
         [
@@ -831,7 +1012,6 @@ def render_leaderboard(overview: pd.DataFrame):
         ]
     )
     render_summary_cards(overview.to_dict("records"), "Total Stableford", "Total Gross", "Total Holes Played")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_overall_page():
@@ -839,10 +1019,8 @@ def render_overall_page():
     render_player_cards()
     render_leaderboard(overview)
 
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Course shots summary")
     render_course_shots_cards()
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_day_page(day_key: str, title: str):
@@ -855,6 +1033,7 @@ def main():
     inject_styles()
 
     render_hero()
+    render_persistence_status()
     page = st.segmented_control(
         "View",
         options=["Overall Leaderboard", "Day 1", "Day 2"],
